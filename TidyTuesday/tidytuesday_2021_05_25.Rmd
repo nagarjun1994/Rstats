@@ -1,0 +1,207 @@
+---
+title: "R Notebook"
+output:
+  word_document: 
+    fig_width: 8
+    fig_height: 6
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+# TidyTuesday
+
+Join the R4DS Online Learning Community in the weekly #TidyTuesday event!
+Every week we post a raw dataset, a chart or article related to that dataset, and ask you to explore the data.
+While the dataset will be “tamed”, it will not always be tidy! As such you might need to apply various R for Data Science techniques to wrangle the data into a true tidy format.
+The goal of TidyTuesday is to apply your R skills, get feedback, explore other’s work, and connect with the greater #RStats community!
+As such we encourage everyone of all skills to participate!
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(tidytuesdayR)
+library(scales)
+library(tvthemes)
+
+theme_set(theme_avatar())
+
+```
+
+# Load the weekly Data
+
+Download the weekly data and make available in the `tt` object.
+
+```{r Load, message=FALSE, warning=FALSE}
+
+tt <- tt_load("2021-05-25")
+drivers <- tt$drivers
+records <- tt$records
+rm(tt) 
+
+
+```
+
+# Visualize
+
+## World records over time
+```{r Visualize}
+
+records %>% 
+  mutate(year=format(date,"%Y")) %>% 
+  group_by(year) %>% 
+  summarise(records = n()) %>% 
+  ggplot(aes(year,records))+
+  geom_bar(stat = "identity",fill="green")+
+  labs(title = "World records over time",
+       subtitle = str_wrap("Majority of records were created before 2000s"),
+       caption = "Data source: TidyTuesday")+
+  theme(plot.title = element_text(hjust=0.5,size = 15),
+        plot.subtitle = element_text(hjust=0.5))+
+  coord_flip()
+  
+```
+
+## World records over time in cumulative percentage
+```{r World records over time}
+records %>% 
+  mutate(year=format(date,"%Y")) %>% 
+  group_by(year) %>% 
+  summarise(records=n()) %>% 
+  mutate(cum_perc = cumsum(records),
+         perc=round(cum_perc/sum(records),2)) %>% 
+  ggplot(aes(year,perc))+
+  geom_bar(stat = "identity")+
+  labs(title = "World records over time",
+       subtitle = str_wrap("Majority of records were created before 2000s"),
+       caption = "Data source: TidyTuesday")+
+  theme(plot.title = element_text(hjust=0.5,size = 15),
+        plot.subtitle = element_text(hjust=0.5))+
+  coord_flip()+
+  scale_y_continuous(labels = percent_format())
+```
+
+## For which track did the world record improve the most?
+
+```{r}
+improvement_by_track <- records %>% 
+  group_by(track) %>% 
+  mutate(improvement = 1-time/lag(time)) %>% 
+  summarise(max_improvement = max(improvement,na.rm = TRUE)) %>% 
+  mutate(track = fct_reorder(track,max_improvement)) %>% 
+  arrange(desc(max_improvement)) %>% 
+  mutate(ToHighlight =ifelse(max_improvement == max(max_improvement), "yes", "no"))
+ 
+  ggplot(improvement_by_track,aes(track,max_improvement,fill=ToHighlight ))+ 
+  geom_bar(stat = "identity")+
+  coord_flip()+
+  scale_y_continuous(labels = percent_format())+
+  labs(title = "Fastest improvement in percentage by track",
+       subtitle = str_wrap("Wario Stadium had a improvement over 78%"),
+       caption = "Data source: TidyTuesday")+
+  theme(plot.title = element_text(hjust=0.5,size = 15),
+        plot.subtitle = element_text(hjust=0.5))+
+  scale_fill_manual( values = c( "yes"="tomato", "no"="gray" ), guide = FALSE )
+
+```
+
+## For how many tracks have shortcuts been discovered?
+```{r}
+records %>% 
+  group_by(track,shortcut) %>%
+  count() %>% 
+  spread(shortcut,n) %>% 
+  mutate(shortcuts_discovered = ifelse(Yes<1 | is.na(Yes),"No","Yes")) %>% 
+  select(-No,-Yes) %>% 
+  ggplot(aes(track,fill=shortcuts_discovered))+ 
+  geom_bar()+
+  coord_flip()+
+  labs(title = "Tracks with no shortcuts discovered",
+       subtitle = str_wrap("There are only 4 tracks with no shortcuts"),
+       caption = "Data source: TidyTuesday")+
+  theme_simpsons()+
+  theme(plot.title = element_text(hjust=0.5,size = 15),
+        plot.subtitle = element_text(hjust=0.5),
+        axis.title = element_blank(),
+        axis.text.x = element_blank())+
+  scale_fill_manual( values = c( "Yes"="gray", "No"="tomato" ), guide = FALSE )
+  
+
+```
+
+## When were shortcuts discovered?
+
+```{r}
+records %>% 
+  group_by(track) %>% 
+  filter(shortcut=="Yes") %>% 
+  summarise(min_date = min(date))
+
+```
+
+## On which track does the shortcut save the most time?
+
+```{r}
+records %>% 
+  group_by(track,shortcut) %>% 
+  summarise(ave_time= mean(time,na.rm = TRUE)) %>% 
+  spread(shortcut,ave_time) %>% 
+  ungroup() %>% 
+  mutate(most_improvement = 1-Yes/No) %>% 
+  mutate(track = fct_reorder(track,most_improvement)) %>% 
+  arrange(most_improvement) %>% 
+  filter(!is.na(most_improvement)) %>% 
+  ggplot(aes(track,most_improvement))+
+  geom_bar(stat = "identity")+
+  coord_flip()+
+  scale_y_continuous(labels = percent_format())+
+  labs(title = "Tracks that save most time",
+       subtitle = str_wrap("D.K.'s Jungle Parkway saves about 60% time using shortcut"),
+       caption = "Data source: TidyTuesday")
+  
+```
+
+## Which is the longest standing world record?
+
+```{r}
+records %>% 
+  arrange(desc(record_duration)) %>% 
+  slice(1:10) %>% 
+  ggplot(aes(player,time,color=track,size=record_duration,shape=type))+
+  geom_point()+
+  labs(title = "Top 10 world record by duration",
+       subtitle = str_wrap("Each record by time, track and type of lap"),
+       caption = "Data source: TidyTuesday")+
+  theme(plot.title = element_text(hjust=0.5,size = 15),
+        plot.subtitle = element_text(hjust=0.5),
+        legend.position = "right")
+  
+```
+
+
+## Who is the player with the most world records?
+
+```{r}
+drivers %>% 
+  group_by(player,nation) %>% 
+  summarise(records = sum(records,na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  mutate(player = fct_reorder(player,records)) %>% 
+  arrange(desc(records)) %>% 
+  slice(1:10) %>% 
+  ggplot(aes(player,records,fill=nation))+
+  geom_bar(stat = "identity")+
+  coord_flip()+
+  labs(title = "Top 10 players with world records",
+       caption = "Data source: TidyTuesday")+
+  theme(plot.title = element_text(hjust=0.5,size = 15),
+        plot.subtitle = element_text(hjust=0.5),
+        legend.position = "right")+
+  geom_label(aes(label=records),show.legend = FALSE,hjust=1,col="white",size=3)
+```
+
