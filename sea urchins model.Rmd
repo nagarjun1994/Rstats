@@ -1,0 +1,141 @@
+---
+title: "Sea Urchins - Linear model to find the width of urchins given the food regime and initial volume"
+output:
+  word_document: 
+    fig_width: 8
+    fig_height: 6
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+pacman::p_load(tidymodels, # tidyverse, models, parsnip for easy modelling
+               readr, # import data
+               broom.mixed, # for converting bayesian models to tidy tibbles
+               dotwhisker, # for visualizing regression results
+               tvthemes, # nice themes
+               ggthemes # more themes
+               )
+theme_set(theme_economist())
+
+```
+
+# Load data
+```{r}
+urchins <- read_csv("https://tidymodels.org/start/models/urchins.csv") %>% 
+  # change column names
+  setNames(c("food_regime","initial_volume","width")) %>% 
+  # change to factor as factors are useful since models perform better 
+  mutate(food_regime = factor(food_regime,levels = c("Initial","Low","High")))
+
+urchins %>% 
+  glimpse()
+  
+```
+
+# visualize the data
+```{r}
+ggplot(urchins, aes(initial_volume,width,group=food_regime,col=food_regime))+
+  geom_point(size=2, alpha=0.8)+
+  geom_smooth(method = "lm",se = FALSE)
+
+```
+
+# Build and fit a model
+```{r}
+# creating a model
+lm_mod <- 
+  linear_reg() %>% 
+  set_engine("lm")
+
+# from here on we can use the model to fit
+lm_fit <- 
+  lm_mod %>% 
+  fit(width~initial_volume * food_regime,data= urchins)
+
+# lets look at the fit
+lm_fit
+
+# lets use tidy() to turn into nice format
+tidy(lm_fit) 
+
+# look at the results in dot whisker plot
+tidy(lm_fit) %>% 
+  dwplot(dot_args = list(size=2,color="black"),
+         whisker_args = list(color = "black"),
+         vline = geom_vline(xintercept = 0,linetype=2,color="grey50"))+
+  theme_minimal()
+```
+
+# predict using the linear model
+```{r}
+new_points <- expand.grid(initial_volume = 20,
+                          food_regime=c("Initial","Low","High"))
+new_points
+
+# get the mean width for the above
+pred_mean <- predict(lm_fit,new_data = new_points)
+pred_mean
+
+# add the confidence intervals
+conf_int_pred <- predict(lm_fit,
+                         new_data = new_points,
+                         type = "conf_int")
+conf_int_pred
+
+# add them togther
+plot_data <- new_points %>% 
+  bind_cols(pred_mean) %>% 
+  bind_cols(conf_int_pred)
+
+ggplot(plot_data,aes(x=food_regime))+
+  geom_point(aes(y=.pred))+
+  geom_errorbar(aes(ymin = .pred_lower,ymax =.pred_upper),
+                width=0.2)+
+  labs(y="urchin_size",title = "Ordinary sum squares")
+
+```
+
+# Bayesian approach
+```{r}
+# very useful to do this for small dataset
+# doesn't give a single number as prediction but a range based on a prior distribution
+# as data points increases, bayesian prediction narrows down to Ordinary least squares prediction value
+
+# set the prior distribution
+set.seed(123)
+prior_dist <- rstanarm::student_t(df=1)
+
+
+# create a model
+bayes_mod <- linear_reg() %>% 
+  set_engine("stan",
+             prior_intercept = prior_dist,
+             prior = prior_dist) 
+
+# fit a model
+bayes_fit <- bayes_mod %>% 
+  fit(width ~ initial_volume * food_regime, data = urchins)
+  
+tidy(bayes_fit, conf.int = TRUE)
+
+# plot bayes data
+bayes_plot_data <- 
+  new_points %>% 
+  bind_cols(predict(bayes_fit,new_data = new_points)) %>% 
+  bind_cols(predict(bayes_fit,new_data = new_points,type = "conf_int"))
+
+ggplot(bayes_plot_data,aes(x=food_regime))+
+  geom_point(aes(y=.pred),size=2)+
+  geom_errorbar(aes(ymin=.pred_lower, ymax=.pred_upper),width=0.2)+
+  labs(y="width",title = "Bayesian model with t(1) prior distribution")
+  
+
+```
+
